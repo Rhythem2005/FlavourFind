@@ -1,8 +1,10 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { useState, useRef, useEffect } from "react";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 import Nav from "../components/Nav";
 import Footer from "../components/Footer";
+import { isRestaurantSaved, toggleSavedRestaurant } from "../utils/storage";
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const C = {
@@ -32,7 +34,6 @@ const C = {
 
 const FONT = "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif";
 
-// ─── Utility Helpers ──────────────────────────────────────────────────────────
 const fmt = (n) => (n != null ? `₹${n.toLocaleString("en-IN")}` : "—");
 
 const ratingColor = (r) => {
@@ -42,26 +43,17 @@ const ratingColor = (r) => {
   return C.brand;
 };
 
-const confidenceScore = (item, cheapestPrice, fastestTime, highestRating) => {
-  if (!item) return 0;
-  let score = 0;
-  if (item.rating != null && highestRating) score += (item.rating / highestRating) * 40;
-  if (item.price != null && cheapestPrice) score += (cheapestPrice / item.price) * 30;
-  if (item.delivery_time != null && fastestTime) score += (fastestTime / item.delivery_time) * 30;
-  return Math.min(Math.round(score), 99);
-};
-
 // ─── Animation Variants ───────────────────────────────────────────────────────
 const fadeUp = {
-  hidden: { opacity: 0, y: 24 },
+  hidden: { opacity: 0, y: 20 },
   visible: (i = 0) => ({
     opacity: 1, y: 0,
-    transition: { delay: i * 0.06, duration: 0.5, ease: [0.22, 1, 0.36, 1] },
+    transition: { delay: i * 0.04, duration: 0.4, ease: [0.22, 1, 0.36, 1] },
   }),
 };
 
 const stagger = {
-  visible: { transition: { staggerChildren: 0.06 } },
+  visible: { transition: { staggerChildren: 0.04 } },
 };
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
@@ -96,28 +88,6 @@ const StarRating = ({ rating, size = 13 }) => {
     </span>
   );
 };
-
-const ConfidenceBar = ({ value }) => (
-  <div style={{ display: "flex", alignItems: "center", gap: 8, width: "100%" }}>
-    <div style={{
-      flex: 1, height: 4, borderRadius: 99,
-      background: C.nightBorder, overflow: "hidden",
-    }}>
-      <motion.div
-        initial={{ width: 0 }}
-        animate={{ width: `${value}%` }}
-        transition={{ duration: 1.2, ease: [0.22, 1, 0.36, 1], delay: 0.4 }}
-        style={{
-          height: "100%", borderRadius: 99,
-          background: value >= 80 ? C.green : value >= 60 ? C.yellow : C.brand,
-        }}
-      />
-    </div>
-    <span style={{ fontSize: 12, fontWeight: 700, color: C.slateLight, minWidth: 28, textAlign: "right" }}>
-      {value}%
-    </span>
-  </div>
-);
 
 const CategoryWinnerCard = ({ icon, label, item, color, bg, isActive, onClick }) => (
   <motion.button
@@ -165,7 +135,7 @@ const CategoryWinnerCard = ({ icon, label, item, color, bg, isActive, onClick })
   </motion.button>
 );
 
-const RestaurantCard = ({ item, index, badges = [], onViewDeal }) => {
+const RestaurantCard = ({ item, index, badges = [], onCompareToggle, isCompared, onBookmarkToggle, isBookmarked, onClick }) => {
   const [imgLoaded, setImgLoaded] = useState(false);
   const [imgError, setImgError] = useState(false);
   const hasThumbnail = item.thumbnail && !imgError;
@@ -182,8 +152,9 @@ const RestaurantCard = ({ item, index, badges = [], onViewDeal }) => {
         cursor: "pointer",
         transition: "border-color 0.25s",
         display: "flex", flexDirection: "column",
+        position: "relative",
       }}
-      onClick={onViewDeal}
+      onClick={onClick}
     >
       {/* Thumbnail */}
       <div style={{
@@ -220,31 +191,45 @@ const RestaurantCard = ({ item, index, badges = [], onViewDeal }) => {
           background: "linear-gradient(transparent, rgba(26,26,30,0.95))",
         }} />
 
-        {/* Badges (top-left) */}
+        {/* Top left badges */}
         {badges.length > 0 && (
-          <div style={{ position: "absolute", top: 10, left: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <div style={{ position: "absolute", top: 10, left: 10, display: "flex", gap: 6, flexWrap: "wrap", zIndex: 5 }}>
             {badges.map((b, i) => (
-              <Badge key={i} color={b.color} bg={b.bg} style={{ fontSize: 10, padding: "3px 8px", backdropFilter: "blur(8px)" }}>
+              <Badge key={i} color={b.color} bg={b.bg} style={{ fontSize: 10, padding: "3px 8px" }}>
                 {b.icon} {b.label}
               </Badge>
             ))}
           </div>
         )}
 
-        {/* Discount (top-right) */}
+        {/* Bookmark star (top-right) */}
+        <button
+          onClick={(e) => { e.stopPropagation(); onBookmarkToggle(); }}
+          style={{
+            position: "absolute", top: 10, right: item.discount ? 95 : 10, zIndex: 10,
+            background: "rgba(13,13,15,0.7)", border: "none", borderRadius: 99,
+            width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center",
+            color: isBookmarked ? C.brand : C.slateLight, cursor: "pointer",
+            fontSize: 14,
+          }}
+        >
+          {isBookmarked ? "★" : "☆"}
+        </button>
+
+        {/* Discount (top-right next to bookmark) */}
         {item.discount && (
           <div style={{
-            position: "absolute", top: 10, right: 10,
-            background: "rgba(34,197,94,0.9)", backdropFilter: "blur(8px)",
-            color: "#fff", fontSize: 11, fontWeight: 800,
-            padding: "4px 10px", borderRadius: 8,
+            position: "absolute", top: 10, right: 10, zIndex: 5,
+            background: "rgba(34,197,94,0.95)", backdropFilter: "blur(8px)",
+            color: "#fff", fontSize: 10, fontWeight: 800,
+            padding: "4px 8px", borderRadius: 8,
           }}>
             {item.discount}
           </div>
         )}
 
         {/* Rating (bottom-right) */}
-        <div style={{ position: "absolute", bottom: 10, right: 12 }}>
+        <div style={{ position: "absolute", bottom: 10, right: 12, zIndex: 5 }}>
           <StarRating rating={item.rating} size={12} />
         </div>
       </div>
@@ -285,15 +270,25 @@ const RestaurantCard = ({ item, index, badges = [], onViewDeal }) => {
             </div>
           </div>
 
-          {/* Platform + CTA */}
+          {/* Platform + Compare selection */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
             <Badge color={C.brand}>{item.platform}</Badge>
-            <motion.span
-              whileHover={{ x: 3 }}
-              style={{ color: C.brand, fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+            
+            <label
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                display: "flex", alignItems: "center", gap: 6, fontSize: 12,
+                color: isCompared ? COLORS.white : C.slateLight, cursor: "pointer", fontWeight: 600,
+              }}
             >
-              View Deal →
-            </motion.span>
+              <input
+                type="checkbox"
+                checked={isCompared}
+                onChange={() => onCompareToggle()}
+                style={{ accentColor: C.brand }}
+              />
+              Compare
+            </label>
           </div>
         </div>
       </div>
@@ -306,7 +301,6 @@ const AIHero = ({ item, query, results }) => {
   if (!item) return null;
 
   const cheapest = results.reduce((min, r) => (r.price != null && (min == null || r.price < min)) ? r.price : min, null);
-  const savings = cheapest != null && item.price != null ? item.price - cheapest : null;
   const avgPrice = results.filter(r => r.price).reduce((s, r, _, a) => s + r.price / a.length, 0);
   const priceDiff = avgPrice ? Math.round(((avgPrice - item.price) / avgPrice) * 100) : 0;
 
@@ -332,16 +326,7 @@ const AIHero = ({ item, query, results }) => {
         overflow: "hidden",
       }}
     >
-      {/* Ambient glow */}
-      <div style={{
-        position: "absolute", top: -80, right: -80,
-        width: 300, height: 300,
-        background: `radial-gradient(circle, ${C.brand}15 0%, transparent 70%)`,
-        pointerEvents: "none",
-      }} />
-
       <div style={{ display: "flex", flexWrap: "wrap", position: "relative", zIndex: 1 }}>
-        {/* Left: Thumbnail */}
         {item.thumbnail && (
           <div style={{
             width: 280, minHeight: 280, flexShrink: 0,
@@ -359,54 +344,30 @@ const AIHero = ({ item, query, results }) => {
           </div>
         )}
 
-        {/* Right: Content */}
         <div style={{ flex: 1, padding: "32px 36px", minWidth: 300 }}>
-          {/* Header badge */}
-          <motion.div
-            initial={{ opacity: 0, x: -10 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ delay: 0.3 }}
-            style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}
-          >
+          <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 10 }}>
             <Badge color={C.green} bg={C.greenDim} style={{ fontSize: 11 }}>
               🏆 AI TOP PICK
             </Badge>
             <Badge color={C.slateLight} bg="rgba(255,255,255,0.04)">
               {results.length} restaurants analyzed
             </Badge>
-          </motion.div>
+          </div>
 
-          {/* Restaurant name */}
-          <motion.h2
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.35 }}
-            style={{
-              color: C.pureWhite, fontSize: 32, fontWeight: 800,
-              margin: "0 0 4px", letterSpacing: "-0.02em", lineHeight: 1.2,
-            }}
-          >
+          <h2 style={{
+            color: C.pureWhite, fontSize: 32, fontWeight: 800,
+            margin: "0 0 4px", letterSpacing: "-0.02em", lineHeight: 1.2,
+          }}>
             {item.restaurant}
-          </motion.h2>
+          </h2>
 
           {item.cuisines && (
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.4 }}
-              style={{ color: C.slate, fontSize: 14, margin: "0 0 20px" }}
-            >
+            <p style={{ color: C.slate, fontSize: 14, margin: "0 0 20px" }}>
               {item.cuisines}
-            </motion.p>
+            </p>
           )}
 
-          {/* Key stats row */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.45 }}
-            style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 24 }}
-          >
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 24 }}>
             <div>
               <div style={{ fontSize: 11, color: C.slate, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Price</div>
               <div style={{ fontSize: 26, fontWeight: 800, color: C.pureWhite }}>{fmt(item.price)}</div>
@@ -419,58 +380,31 @@ const AIHero = ({ item, query, results }) => {
               <div style={{ fontSize: 11, color: C.slate, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Rating</div>
               <div style={{ fontSize: 26, fontWeight: 800, color: ratingColor(item.rating) }}>★ {item.rating?.toFixed(1) ?? "—"}</div>
             </div>
-            {item.discount && (
-              <div>
-                <div style={{ fontSize: 11, color: C.slate, marginBottom: 4, textTransform: "uppercase", letterSpacing: "0.06em" }}>Offer</div>
-                <div style={{ fontSize: 16, fontWeight: 700, color: C.green }}>{item.discount}</div>
-              </div>
-            )}
-          </motion.div>
+          </div>
 
-          {/* AI Reasoning */}
           {reasons.length > 0 && (
-            <motion.div
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: 0.55 }}
-              style={{
-                background: "rgba(255,255,255,0.03)",
-                border: `1px solid ${C.nightBorder}`,
-                borderRadius: 14, padding: "14px 18px",
-                marginBottom: 20,
-              }}
-            >
+            <div style={{
+              background: "rgba(255,255,255,0.03)",
+              border: `1px solid ${C.nightBorder}`,
+              borderRadius: 14, padding: "14px 18px",
+              marginBottom: 20,
+            }}>
               <div style={{ fontSize: 11, color: C.brand, fontWeight: 700, marginBottom: 8, letterSpacing: "0.04em" }}>
                 🧠 WHY THIS PICK
               </div>
               {reasons.map((r, i) => (
-                <motion.div
-                  key={i}
-                  initial={{ opacity: 0, x: -8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.65 + i * 0.08 }}
-                  style={{
-                    display: "flex", alignItems: "flex-start", gap: 8,
-                    marginBottom: i < reasons.length - 1 ? 6 : 0,
-                  }}
-                >
+                <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: i < reasons.length - 1 ? 6 : 0 }}>
                   <span style={{ color: C.green, fontSize: 12, marginTop: 1 }}>✓</span>
                   <span style={{ color: C.slateLight, fontSize: 13, lineHeight: 1.5 }}>{r}</span>
-                </motion.div>
+                </div>
               ))}
-            </motion.div>
+            </div>
           )}
 
-          {/* CTA */}
-          <motion.a
+          <a
             href={item.restaurant_url || "#"}
             target="_blank"
             rel="noopener noreferrer"
-            whileHover={{ scale: 1.03 }}
-            whileTap={{ scale: 0.97 }}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.7 }}
             style={{
               display: "inline-flex", alignItems: "center", gap: 8,
               background: C.brand, color: "#fff",
@@ -481,7 +415,7 @@ const AIHero = ({ item, query, results }) => {
             }}
           >
             Order on {item.platform} →
-          </motion.a>
+          </a>
         </div>
       </div>
     </motion.section>
@@ -497,65 +431,77 @@ const SORT_OPTIONS = [
   { key: "delivery", label: "Fastest Delivery" },
 ];
 
-const sortResults = (results, sortKey) => {
-  const sorted = [...results];
-  switch (sortKey) {
-    case "price_low": return sorted.sort((a, b) => (a.price ?? 9999) - (b.price ?? 9999));
-    case "price_high": return sorted.sort((a, b) => (b.price ?? 0) - (a.price ?? 0));
-    case "rating": return sorted.sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
-    case "delivery": return sorted.sort((a, b) => (a.delivery_time ?? 9999) - (b.delivery_time ?? 9999));
-    default: return sorted;
-  }
-};
-
 // ─── Main Results Page ────────────────────────────────────────────────────────
 export default function Results() {
   const location = useLocation();
   const navigate = useNavigate();
   const data = location.state;
+  
   const [sortKey, setSortKey] = useState("relevance");
   const [activeWinner, setActiveWinner] = useState(null);
-  const gridRef = useRef(null);
+  
+  // Custom Filters state
+  const [priceRange, setPriceRange] = useState(1000);
+  const [deliveryFilter, setDeliveryFilter] = useState(60);
+  const [ratingFilter, setRatingFilter] = useState(0);
 
-  // Empty state
+  // Compare & Bookmark state
+  const [selectedForCompare, setSelectedForCompare] = useState([]);
+  const [bookmarkedItems, setBookmarkedItems] = useState({});
+
+  useEffect(() => {
+    if (data?.results) {
+      // Load bookmark status for all results
+      const bookmarks = {};
+      data.results.forEach(item => {
+        bookmarks[item.restaurant] = isRestaurantSaved(item.restaurant);
+      });
+      setBookmarkedItems(bookmarks);
+    }
+  }, [data]);
+
+  const handleBookmarkToggle = (item) => {
+    const isSaved = toggleSavedRestaurant(item);
+    setBookmarkedItems(prev => ({
+      ...prev,
+      [item.restaurant]: isSaved,
+    }));
+  };
+
+  const handleCompareToggle = (item) => {
+    setSelectedForCompare(prev => {
+      const exists = prev.find(r => r.restaurant.toLowerCase() === item.restaurant.toLowerCase());
+      if (exists) {
+        return prev.filter(r => r.restaurant.toLowerCase() !== item.restaurant.toLowerCase());
+      } else {
+        if (prev.length >= 3) {
+          alert("You can compare up to 3 restaurants at a time.");
+          return prev;
+        }
+        return [...prev, item];
+      }
+    });
+  };
+
   if (!data || !data.query) {
     return (
       <div style={{ fontFamily: FONT, background: C.night }}>
         <Nav />
-        <main style={{
-          background: C.night, minHeight: "100vh",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          paddingTop: 100, paddingBottom: 80,
-        }}>
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            animate={{ opacity: 1, y: 0 }}
-            style={{ textAlign: "center", maxWidth: 500, padding: "0 24px" }}
-          >
+        <main style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", paddingTop: 100 }}>
+          <div style={{ textAlign: "center", maxWidth: 500, padding: "0 24px" }}>
             <div style={{ fontSize: 72, marginBottom: 24 }}>🔍</div>
-            <h1 style={{
-              color: C.pureWhite, fontSize: 40, fontWeight: 900,
-              marginBottom: 12, letterSpacing: "-0.03em",
-            }}>
-              No results yet
-            </h1>
-            <p style={{ color: C.slateLight, fontSize: 17, lineHeight: 1.6, marginBottom: 32 }}>
-              Search for any dish to see AI-powered restaurant recommendations.
-            </p>
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.97 }}
+            <h1 style={{ color: C.white, fontSize: 40, fontWeight: 900, marginBottom: 12 }}>No results yet</h1>
+            <p style={{ color: C.slateLight, fontSize: 17, marginBottom: 32 }}>Search for any dish to see recommendations.</p>
+            <button
               onClick={() => navigate("/")}
               style={{
                 background: C.brand, color: "#fff", border: "none", borderRadius: 14,
-                padding: "14px 32px", fontSize: 16, fontWeight: 700,
-                cursor: "pointer", fontFamily: "inherit",
-                boxShadow: `0 4px 20px ${C.brand}44`,
+                padding: "14px 32px", fontSize: 16, fontWeight: 700, cursor: "pointer",
               }}
             >
               ← Back to Search
-            </motion.button>
-          </motion.div>
+            </button>
+          </div>
         </main>
         <Footer />
       </div>
@@ -563,15 +509,31 @@ export default function Results() {
   }
 
   const results = data.results || [];
-  const sortedResults = sortResults(results, sortKey);
+
+  // Filter application
+  const filteredResults = results.filter(item => {
+    const priceMatch = item.price == null || item.price <= priceRange;
+    const deliveryMatch = item.delivery_time == null || item.delivery_time <= deliveryFilter;
+    const ratingMatch = item.rating == null || item.rating >= ratingFilter;
+    return priceMatch && deliveryMatch && ratingMatch;
+  });
+
+  // Sort application
+  const sortedResults = [...filteredResults].sort((a, b) => {
+    if (sortKey === "price_low") return (a.price ?? 9999) - (b.price ?? 9999);
+    if (sortKey === "price_high") return (b.price ?? 0) - (a.price ?? 0);
+    if (sortKey === "rating") return (b.rating ?? 0) - (a.rating ?? 0);
+    if (sortKey === "delivery") return (a.delivery_time ?? 9999) - (b.delivery_time ?? 9999);
+    return 0; // relevance
+  });
+
   const hasResults = results.length > 0;
 
-  // Compute stats for confidence
+  // Stats computation
   const cheapestPrice = results.reduce((m, r) => r.price != null && (m == null || r.price < m) ? r.price : m, null);
   const fastestTime = results.reduce((m, r) => r.delivery_time != null && (m == null || r.delivery_time < m) ? r.delivery_time : m, null);
   const highestRating = results.reduce((m, r) => r.rating != null && (m == null || r.rating > m) ? r.rating : m, null);
 
-  // Determine badges for each restaurant
   const getBadges = (item) => {
     const b = [];
     if (data.best_overall && item.restaurant === data.best_overall.restaurant) b.push({ icon: "🏆", label: "Best", color: "#fff", bg: C.brand });
@@ -581,7 +543,6 @@ export default function Results() {
     return b;
   };
 
-  // Winner cards config
   const winners = [
     { key: "best_overall", icon: "🏆", label: "Best Overall", color: C.brand, bg: C.brandDim, item: data.best_overall },
     { key: "cheapest", icon: "💰", label: "Cheapest", color: C.green, bg: C.greenDim, item: data.cheapest },
@@ -589,21 +550,32 @@ export default function Results() {
     { key: "highest_rated", icon: "⭐", label: "Top Rated", color: C.purple, bg: C.purpleDim, item: data.highest_rated },
   ];
 
-  const handleWinnerClick = (key) => {
-    setActiveWinner(activeWinner === key ? null : key);
-    if (gridRef.current) {
-      gridRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Price analysis chart data
+  const chartData = sortedResults.slice(0, 8).map(item => ({
+    name: item.restaurant.length > 15 ? `${item.restaurant.substring(0, 15)}...` : item.restaurant,
+    price: item.price || 0,
+  }));
+
+  // Tradeoff Analysis Block calculation
+  const getTradeoffDescription = () => {
+    if (!data.cheapest || !data.fastest) return null;
+    const priceDiff = (data.fastest.price || 0) - (data.cheapest.price || 0);
+    const speedDiff = (data.cheapest.delivery_time || 0) - (data.fastest.delivery_time || 0);
+    
+    if (priceDiff > 0 && speedDiff > 0) {
+      return `The Cheapest option (${data.cheapest.restaurant}) saves you ₹${priceDiff} but takes ${speedDiff} minutes longer to deliver than the Fastest option (${data.fastest.restaurant}).`;
     }
+    return `Balanced options available: Cheapest is ₹${data.cheapest.price} and Fastest is ${data.fastest.delivery_time} min.`;
   };
 
   return (
     <div style={{ fontFamily: FONT, background: C.night }}>
       <Nav />
 
-      <main style={{ background: C.night, minHeight: "100vh", paddingTop: 88, paddingBottom: 80 }}>
+      <main style={{ background: C.night, minHeight: "100vh", paddingTop: 88, paddingBottom: 100 }}>
         <div style={{ maxWidth: 1200, margin: "0 auto", padding: "0 24px" }}>
 
-          {/* ── Page Header ─────────────────────────────────────── */}
+          {/* Header */}
           <motion.div
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
@@ -611,18 +583,17 @@ export default function Results() {
             style={{ marginBottom: 32 }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16, flexWrap: "wrap" }}>
-              <motion.button
-                whileHover={{ x: -3 }}
+              <button
                 onClick={() => navigate("/")}
                 style={{
                   background: "none", border: `1px solid ${C.nightBorder}`,
                   color: C.slateLight, borderRadius: 10, padding: "8px 14px",
-                  fontSize: 13, fontWeight: 600, cursor: "pointer", fontFamily: "inherit",
+                  fontSize: 13, fontWeight: 600, cursor: "pointer",
                   display: "flex", alignItems: "center", gap: 6,
                 }}
               >
                 ← New Search
-              </motion.button>
+              </button>
               <Badge color={C.brand}>AI Powered</Badge>
               {hasResults && (
                 <span style={{ color: C.slate, fontSize: 13 }}>
@@ -641,14 +612,14 @@ export default function Results() {
 
           {hasResults ? (
             <>
-              {/* ── AI Hero Recommendation ──────────────────────── */}
+              {/* AI Hero */}
               <AIHero
                 item={data.best_overall}
                 query={data.query}
                 results={results}
               />
 
-              {/* ── Category Winners Strip ──────────────────────── */}
+              {/* Category Winners Strip */}
               <motion.div
                 variants={stagger}
                 initial="hidden"
@@ -657,7 +628,7 @@ export default function Results() {
                   display: "grid",
                   gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
                   gap: 14,
-                  marginBottom: 40,
+                  marginBottom: 32,
                 }}
               >
                 {winners.map((w) => (
@@ -665,50 +636,146 @@ export default function Results() {
                     key={w.key}
                     {...w}
                     isActive={activeWinner === w.key}
-                    onClick={() => handleWinnerClick(w.key)}
+                    onClick={() => {
+                      setActiveWinner(activeWinner === w.key ? null : w.key);
+                      if (w.item) {
+                        navigate(`/restaurant/${encodeURIComponent(w.item.restaurant)}`, { state: { restaurant: w.item, alternatives: results } });
+                      }
+                    }}
                   />
                 ))}
               </motion.div>
 
-              {/* ── Sort / Filter Bar ───────────────────────────── */}
-              <motion.div
-                ref={gridRef}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.3 }}
-                style={{
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  flexWrap: "wrap", gap: 12,
-                  marginBottom: 24, paddingTop: 8,
-                }}
-              >
-                <h2 style={{ color: C.pureWhite, fontSize: 22, fontWeight: 800, margin: 0 }}>
-                  All Restaurants
-                </h2>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {SORT_OPTIONS.map((opt) => (
-                    <motion.button
-                      key={opt.key}
-                      type="button"
-                      whileTap={{ scale: 0.96 }}
-                      onClick={() => setSortKey(opt.key)}
-                      style={{
-                        background: sortKey === opt.key ? C.brand : "rgba(255,255,255,0.04)",
-                        border: `1px solid ${sortKey === opt.key ? C.brand : C.nightBorder}`,
-                        color: sortKey === opt.key ? "#fff" : C.slateLight,
-                        borderRadius: 10, padding: "7px 14px",
-                        fontSize: 12, fontWeight: 600,
-                        cursor: "pointer", fontFamily: "inherit",
-                        transition: "all 0.2s",
-                      }}
-                    >
-                      {opt.label}
-                    </motion.button>
-                  ))}
+              {/* Tradeoff & Price Analysis Block */}
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(450px, 1fr))",
+                gap: 24,
+                marginBottom: 40,
+              }}>
+                {/* Visual Chart */}
+                <div style={{
+                  background: C.nightCard, border: `1px solid ${C.nightBorder}`, borderRadius: 24,
+                  padding: "24px",
+                }}>
+                  <h3 style={{ color: C.white, fontSize: 16, fontWeight: 700, marginBottom: 16 }}>Cost Comparison Matrix</h3>
+                  <div style={{ width: "100%", height: 160 }}>
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={chartData}>
+                        <XAxis dataKey="name" stroke={C.slateLight} fontSize={9} tickLine={false} />
+                        <Tooltip contentStyle={{ background: C.nightCard, borderColor: C.nightBorder, color: C.white }} />
+                        <Bar dataKey="price" fill={C.brand} radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
                 </div>
-              </motion.div>
 
-              {/* ── Results Grid ────────────────────────────────── */}
+                {/* Tradeoff explanation */}
+                <div style={{
+                  background: `linear-gradient(135deg, ${C.nightCard} 0%, ${C.nightSurface} 100%)`,
+                  border: `1px solid ${C.nightBorder}`, borderRadius: 24,
+                  padding: "24px", display: "flex", flexDirection: "column", justifyContent: "center",
+                }}>
+                  <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                    <span style={{ fontSize: 24 }}>🧠</span>
+                    <div>
+                      <h4 style={{ color: C.white, fontSize: 16, fontWeight: 700, margin: "0 0 6px" }}>AI Tradeoff Insights</h4>
+                      <p style={{ color: C.slateLight, fontSize: 14, lineHeight: 1.6, margin: 0 }}>
+                        {getTradeoffDescription()} Choose Cheapest for maximum savings, or Fastest if you are in a rush.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Controls Sidebar & Sort Bar */}
+              <div style={{
+                background: C.nightCard, border: `1px solid ${C.nightBorder}`, borderRadius: 20,
+                padding: "20px 24px", marginBottom: 32,
+                display: "flex", flexDirection: "column", gap: 20,
+              }}>
+                <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+                  <h2 style={{ color: C.pureWhite, fontSize: 20, fontWeight: 800, margin: 0 }}>Filters & Controls</h2>
+                  
+                  {/* Sort Bar */}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {SORT_OPTIONS.map((opt) => (
+                      <button
+                        key={opt.key}
+                        onClick={() => setSortKey(opt.key)}
+                        style={{
+                          background: sortKey === opt.key ? C.brand : "rgba(255,255,255,0.04)",
+                          border: `1px solid ${sortKey === opt.key ? C.brand : C.nightBorder}`,
+                          color: sortKey === opt.key ? "#fff" : C.slateLight,
+                          borderRadius: 10, padding: "7px 14px",
+                          fontSize: 12, fontWeight: 600, cursor: "pointer",
+                        }}
+                      >
+                        {opt.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Range inputs */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 20 }}>
+                  {/* Price Slider */}
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: C.slateLight, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                      <span>Max Price (For Two)</span>
+                      <span style={{ color: C.white }}>₹{priceRange}</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={cheapestPrice || 100}
+                      max={2000}
+                      step={50}
+                      value={priceRange}
+                      onChange={(e) => setPriceRange(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: C.brand }}
+                    />
+                  </div>
+
+                  {/* Speed Slider */}
+                  <div>
+                    <div style={{ display: "flex", justifyContent: "space-between", color: C.slateLight, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>
+                      <span>Max Delivery Time</span>
+                      <span style={{ color: C.white }}>{deliveryFilter} min</span>
+                    </div>
+                    <input
+                      type="range"
+                      min={fastestTime || 15}
+                      max={90}
+                      step={5}
+                      value={deliveryFilter}
+                      onChange={(e) => setDeliveryFilter(Number(e.target.value))}
+                      style={{ width: "100%", accentColor: C.brand }}
+                    />
+                  </div>
+
+                  {/* Rating Selector */}
+                  <div>
+                    <div style={{ color: C.slateLight, fontSize: 12, fontWeight: 600, marginBottom: 8 }}>Min Rating</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      {[0, 3.5, 4.0, 4.3].map((r) => (
+                        <button
+                          key={r}
+                          onClick={() => setRatingFilter(r)}
+                          style={{
+                            flex: 1, background: ratingFilter === r ? C.brand : "rgba(255,255,255,0.03)",
+                            border: `1px solid ${ratingFilter === r ? C.brand : C.nightBorder}`,
+                            color: C.white, borderRadius: 8, padding: "6px 8px", fontSize: 12, cursor: "pointer",
+                          }}
+                        >
+                          {r === 0 ? "All" : `${r}★+`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Results Grid */}
               <motion.div
                 variants={stagger}
                 initial="hidden"
@@ -719,40 +786,37 @@ export default function Results() {
                   gap: 20,
                 }}
               >
-                <AnimatePresence mode="popLayout">
-                  {sortedResults.map((item, index) => (
-                    <RestaurantCard
-                      key={item.restaurant + index}
-                      item={item}
-                      index={index}
-                      badges={getBadges(item)}
-                      onViewDeal={() => {
-                        if (item.restaurant_url) window.open(item.restaurant_url, "_blank");
-                      }}
-                    />
-                  ))}
-                </AnimatePresence>
+                {sortedResults.map((item, index) => (
+                  <RestaurantCard
+                    key={item.restaurant + index}
+                    item={item}
+                    index={index}
+                    badges={getBadges(item)}
+                    isCompared={selectedForCompare.some(r => r.restaurant.toLowerCase() === item.restaurant.toLowerCase())}
+                    onCompareToggle={() => handleCompareToggle(item)}
+                    isBookmarked={bookmarkedItems[item.restaurant] || false}
+                    onBookmarkToggle={() => handleBookmarkToggle(item)}
+                    onClick={() => navigate(`/restaurant/${encodeURIComponent(item.restaurant)}`, { state: { restaurant: item, alternatives: results } })}
+                  />
+                ))}
               </motion.div>
 
-              {/* ── Quick Insight Footer ────────────────────────── */}
+              {/* Quick Insight Footer */}
               <motion.div
                 initial={{ opacity: 0, y: 16 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.5 }}
                 style={{
                   marginTop: 48,
-                  background: C.nightCard,
-                  border: `1px solid ${C.nightBorder}`,
-                  borderRadius: 20,
+                  background: C.nightCard, border: `1px solid ${C.nightBorder}`, borderRadius: 20,
                   padding: "28px 32px",
-                  display: "flex", gap: 32, flexWrap: "wrap",
-                  justifyContent: "center",
+                  display: "flex", gap: 32, flexWrap: "wrap", justifyContent: "center",
                 }}
               >
                 {[
                   { label: "Restaurants Found", value: results.length, icon: "🍽️" },
-                  { label: "Price Range", value: cheapestPrice != null ? `${fmt(cheapestPrice)} – ${fmt(Math.max(...results.filter(r => r.price).map(r => r.price)))}` : "—", icon: "💰" },
-                  { label: "Fastest Delivery", value: fastestTime != null ? `${fastestTime} min` : "—", icon: "⚡" },
+                  { label: "Cheapest Deal", value: cheapestPrice != null ? fmt(cheapestPrice) : "—", icon: "💰" },
+                  { label: "Fastest Speed", value: fastestTime != null ? `${fastestTime} min` : "—", icon: "⚡" },
                   { label: "Highest Rating", value: highestRating != null ? `${highestRating.toFixed(1)} ★` : "—", icon: "⭐" },
                 ].map(({ label, value, icon }) => (
                   <div key={label} style={{ textAlign: "center", minWidth: 120 }}>
@@ -764,7 +828,6 @@ export default function Results() {
               </motion.div>
             </>
           ) : (
-            /* ── No Results State ────────────────────────────── */
             <motion.div
               initial={{ opacity: 0, y: 24 }}
               animate={{ opacity: 1, y: 0 }}
@@ -772,27 +835,80 @@ export default function Results() {
             >
               <div style={{ fontSize: 64, marginBottom: 20 }}>😕</div>
               <h2 style={{ color: C.pureWhite, fontSize: 28, fontWeight: 800, marginBottom: 8 }}>
-                No restaurants found for "{data.query}"
+                No restaurants found matching filters
               </h2>
               <p style={{ color: C.slateLight, fontSize: 16, marginBottom: 28 }}>
-                Try a different search term or check back in a moment.
+                Try relaxing your price, delivery, or rating filters.
               </p>
-              <motion.button
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.97 }}
-                onClick={() => navigate("/")}
-                style={{
-                  background: C.brand, color: "#fff", border: "none", borderRadius: 14,
-                  padding: "14px 28px", fontSize: 15, fontWeight: 700,
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
-                ← Try Another Search
-              </motion.button>
             </motion.div>
           )}
         </div>
       </main>
+
+      {/* Floating Comparison Drawer */}
+      <AnimatePresence>
+        {selectedForCompare.length > 0 && (
+          <motion.div
+            initial={{ y: 100, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: 100, opacity: 0 }}
+            style={{
+              position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)",
+              background: COLORS.nightCard, border: `1.5px solid ${C.brand}`, borderRadius: 20,
+              padding: "16px 28px", boxShadow: "0 10px 40px rgba(0,0,0,0.6)",
+              display: "flex", alignItems: "center", gap: 32, zIndex: 500, width: "90%", maxWidth: 650,
+            }}
+          >
+            <div style={{ flex: 1 }}>
+              <div style={{ color: COLORS.white, fontSize: 15, fontWeight: 800, marginBottom: 4 }}>Compare Restaurants</div>
+              <div style={{ color: C.slateLight, fontSize: 12 }}>
+                {selectedForCompare.length} of 3 selected.
+              </div>
+            </div>
+            
+            <div style={{ display: "flex", gap: 10 }}>
+              {selectedForCompare.map((r, idx) => (
+                <div key={r.restaurant + idx} style={{ position: "relative" }}>
+                  {r.thumbnail ? (
+                    <img
+                      src={r.thumbnail}
+                      alt={r.restaurant}
+                      style={{ width: 44, height: 44, borderRadius: 10, objectFit: "cover" }}
+                    />
+                  ) : (
+                    <div style={{ width: 44, height: 44, borderRadius: 10, background: COLORS.nightSurface, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20 }}>
+                      🍽️
+                    </div>
+                  )}
+                  <button
+                    onClick={() => handleCompareToggle(r)}
+                    style={{
+                      position: "absolute", top: -6, right: -6, background: "#EF4444", color: "#fff",
+                      border: "none", borderRadius: 99, width: 16, height: 16, fontSize: 10,
+                      display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <button
+              onClick={() => navigate("/compare", { state: { restaurants: selectedForCompare } })}
+              disabled={selectedForCompare.length < 2}
+              style={{
+                background: selectedForCompare.length < 2 ? C.nightBorder : C.brand,
+                color: "#fff", border: "none", borderRadius: 12, padding: "10px 20px",
+                fontSize: 14, fontWeight: 700, cursor: selectedForCompare.length < 2 ? "not-allowed" : "pointer",
+                transition: "background 0.2s",
+              }}
+            >
+              Compare Now
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <Footer />
     </div>
