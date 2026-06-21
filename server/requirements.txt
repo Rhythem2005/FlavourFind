@@ -1,0 +1,5 @@
+# Server
+fastapi
+uvicorn
+python-dotenv
+playwright

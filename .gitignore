@@ -1,0 +1,36 @@
+# Dependency directories
+node_modules/
+dist/
+dist-ssr/
+
+# Python cache and environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+*.egg-info/
+.mypy_cache/
+.pytest_cache/
+
+# Environments / Secrets
+.env
+.env.*
+!.env.example
+
+# OS/IDE files
+.DS_Store
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Scraper debug JSON files
+server/scrapers/zomato/*.json
