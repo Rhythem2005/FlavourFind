@@ -1,7 +1,5 @@
 import { useState, useEffect } from "react";
-import { Link, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
-import { getSavedRestaurants } from "../utils/storage";
 
 const COLORS = {
   brand: "#FF5C2B",
@@ -11,33 +9,14 @@ const COLORS = {
 };
 
 export default function Nav() {
-  const location = useLocation();
   const [scrolled, setScrolled] = useState(false);
-  const [savedCount, setSavedCount] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
-    const handleScroll = () => setScrolled(window.scrollY > 40);
-    window.addEventListener("scroll", handleScroll);
-    
-    // Bookmark count listener
-    const updateCount = () => {
-      setSavedCount(getSavedRestaurants().length);
-    };
-    updateCount();
-    window.addEventListener("foodlens_saved_changed", updateCount);
-
-    return () => {
-      window.removeEventListener("scroll", handleScroll);
-      window.removeEventListener("foodlens_saved_changed", updateCount);
-    };
+    const handler = () => setScrolled(window.scrollY > 40);
+    window.addEventListener("scroll", handler);
+    return () => window.removeEventListener("scroll", handler);
   }, []);
-
-  const links = [
-    { label: "Search", path: "/" },
-    { label: "Saved", path: "/saved", count: savedCount },
-    { label: "History", path: "/history" },
-    { label: "Insights", path: "/insights" },
-  ];
 
   return (
     <motion.nav
@@ -60,7 +39,7 @@ export default function Nav() {
       }}
     >
       {/* Logo */}
-      <Link to="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <div style={{
           width: 32, height: 32,
           background: COLORS.brand,
@@ -71,45 +50,37 @@ export default function Nav() {
         <span style={{ color: COLORS.white, fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>
           FoodLens<span style={{ color: COLORS.brand }}>AI</span>
         </span>
-      </Link>
+      </div>
 
-      {/* Navigation Links */}
-      <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-        {links.map(link => {
-          const isActive = location.pathname === link.path;
-          return (
-            <Link
-              key={link.label}
-              to={link.path}
-              style={{
-                color: isActive ? COLORS.white : COLORS.slateLight,
-                fontSize: 14,
-                fontWeight: isActive ? 700 : 500,
-                textDecoration: "none",
-                transition: "color 0.2s",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-              }}
-            >
-              {link.label}
-              {link.count !== undefined && link.count > 0 && (
-                <span style={{
-                  background: COLORS.brand,
-                  color: "#fff",
-                  fontSize: 10,
-                  fontWeight: 800,
-                  padding: "1px 6px",
-                  borderRadius: 99,
-                }}>
-                  {link.count}
-                </span>
-              )}
-            </Link>
-          );
-        })}
+      {/* Desktop Links */}
+      <div className="nav-desktop" style={{ display: "flex", alignItems: "center", gap: 32 }}>
+        {["Features", "How It Works", "Pricing", "Blog"].map(link => (
+          <a key={link} href="#" style={{
+            color: COLORS.slateLight, fontSize: 14, fontWeight: 500,
+            textDecoration: "none", transition: "color 0.2s",
+          }}
+            onMouseEnter={e => e.target.style.color = COLORS.white}
+            onMouseLeave={e => e.target.style.color = COLORS.slateLight}
+          >{link}</a>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <a href="#" style={{
+          color: COLORS.slateLight, fontSize: 14, fontWeight: 500,
+          textDecoration: "none", padding: "8px 16px",
+        }}>Sign in</a>
+        <motion.button
+          whileHover={{ scale: 1.04 }}
+          whileTap={{ scale: 0.97 }}
+          style={{
+            background: COLORS.brand, color: "#fff",
+            border: "none", borderRadius: 10,
+            padding: "9px 20px", fontSize: 14, fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >Get Started Free</motion.button>
       </div>
     </motion.nav>
   );
 }
-

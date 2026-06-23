@@ -3,3 +3,6 @@ fastapi
 uvicorn
 python-dotenv
 playwright
+
+# AI / NLU (Phase 2)
+google-genai
