@@ -1,6 +1,5 @@
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/tandpfun/skill-icons/main/icons/Food.svg" width="120"/>
 
 # 🍕 FoodLens AI
 
