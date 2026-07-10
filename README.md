@@ -69,21 +69,6 @@ I --> L
 J --> L
 K --> L
 ```
-
----
-
-# ✨ Features
-
-- 🔍 Natural language food search
-- ⚡ Real-time restaurant comparison
-- 🍕 Multi-platform search
-- 📊 Intelligent ranking engine
-- 💰 Cheapest option detection
-- ⭐ Highest-rated recommendations
-- 🚀 Fastest delivery recommendations
-- 🎯 Smart comparison of offers across platforms
-- 📱 Modern responsive UI
-
 ---
 
 # 🧠 Ranking Engine
@@ -190,30 +175,6 @@ client/
 - [ ] Better ETA Prediction
 - [ ] AI-powered Recommendations
 - [ ] Historical Price Tracking
-
----
-
-# 🎯 Example Searches
-
-```text
-Best pizza under ₹500
-```
-
-```text
-Cheapest burger near me
-```
-
-```text
-Healthy meals under ₹250
-```
-
-```text
-Highest rated biryani
-```
-
-```text
-Fastest momos delivery
-```
 
 ---
 
