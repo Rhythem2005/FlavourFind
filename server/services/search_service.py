@@ -2,7 +2,7 @@
 Search service for FoodLens AI.
 
 Orchestrates the full search pipeline:
-  Query → Intent Extraction → Zomato Scrape → Smart Filtering → Relevance Ranking → Results
+  Query → Intent Extraction → Zomato+Swiggy Scrape → Smart Filtering → Relevance Ranking → Results
 
 Supports both the legacy `search_food()` (for backwards compat) and the
 new `search_with_intent()` that powers Phase 2/3.
@@ -10,17 +10,32 @@ new `search_with_intent()` that powers Phase 2/3.
 Phase 3 change: `search_with_intent` now calls `rank_with_intent` from the
 ranking service so results are ordered by relevance + utility before being
 returned to the route layer.
+
+Phase 2 (Swiggy): Both Zomato and Swiggy scrapers run in parallel via
+ThreadPoolExecutor. Results are merged into a unified list before ranking.
 """
 
 import logging
 from typing import Optional
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from scrapers.zomato.scraper import scrape_zomato
+from scrapers.swiggy.scraper import scrape_swiggy
 from services.query_understanding import extract_intent, FALLBACK_CATEGORIES
 from services.ranking_service import rank_with_intent
 from schemas.search_intent import SearchIntent
 
 logger = logging.getLogger(__name__)
+
+
+def _platform_counts(results: list[dict]) -> str:
+    """Return a compact platform-distribution string for trace logging."""
+    counts: dict[str, int] = {}
+    for r in results:
+        p = r.get("platform", "unknown")
+        counts[p] = counts.get(p, 0) + 1
+    parts = [f"{p}: {n}" for p, n in sorted(counts.items())]
+    return f"total={len(results)} ({', '.join(parts)})" if parts else "total=0"
 
 
 # ── Legacy search (unchanged) ─────────────────────────────────────────────────
@@ -84,6 +99,8 @@ def search_with_intent(query: str) -> dict:
         logger.info("No food term extracted — trying fallback categories")
         raw_results = _search_fallback_categories(query)
 
+    logger.info(f"[TRACE] After scrape: {_platform_counts(raw_results)}")
+
     # Step 4 — Smart filtering (budget, speed, rating preference hard-filters)
     filtered = _apply_smart_filters(raw_results, intent)
 
@@ -92,10 +109,15 @@ def search_with_intent(query: str) -> dict:
         logger.warning("Smart filtering removed all results — returning unfiltered")
         filtered = raw_results
 
+    logger.info(f"[TRACE] After smart filters: {_platform_counts(filtered)}")
+
     # Step 5 — Relevance-aware ranking (NEW: Phase 3)
     # This sorts by relevance to the food term FIRST, then by utility factors.
     # Burger King won't appear at the top of a biryani search anymore.
     ranked = rank_with_intent(filtered, intent)
+
+    logger.info(f"[TRACE] After ranking: {_platform_counts(ranked)}")
+
     # Step 6 — Relevance cutoff (NEW)
     # Drop restaurants that scored below the minimum relevance threshold.
     # 0.40 = alias-name match minimum; anything below means no connection to the food term.
@@ -106,8 +128,8 @@ def search_with_intent(query: str) -> dict:
             logger.info(f"Relevance cutoff: kept {len(relevant)} relevant results")
 
     logger.info(
-        f"search_with_intent '{query}' → "
-        f"{len(ranked)} results, top: {ranked[0].get('restaurant') if ranked else 'none'}"
+        f"[TRACE] Final output: {_platform_counts(ranked)}, "
+        f"top: {ranked[0].get('restaurant') if ranked else 'none'}"
     )
 
     return {
@@ -118,19 +140,40 @@ def search_with_intent(query: str) -> dict:
 
 
 def _scrape_and_format(search_term: str, original_query: str) -> list[dict]:
-    """Scrape Zomato and format results into the standard dict shape."""
-    try:
-        raw = scrape_zomato(query=search_term, city="delhi")
-    except Exception as e:
-        logger.error(f"Scraper failed for '{search_term}': {e}")
-        raw = []
+    """
+    Scrape Zomato and Swiggy in parallel, then merge results into
+    the standard dict shape.
+    """
+    zomato_raw: list[dict] = []
+    swiggy_raw: list[dict] = []
 
-    if not raw:
-        logger.warning(f"No scraper results for '{search_term}'")
+    # Run both scrapers in parallel — each launches its own browser
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = {
+            pool.submit(scrape_zomato, query=search_term, city="delhi"): "zomato",
+            pool.submit(scrape_swiggy, query=search_term, city="delhi"): "swiggy",
+        }
+        for future in as_completed(futures):
+            platform = futures[future]
+            try:
+                result = future.result()
+                if platform == "zomato":
+                    zomato_raw = result or []
+                else:
+                    swiggy_raw = result or []
+                logger.info(f"{platform.title()} returned {len(result or [])} results")
+            except Exception as e:
+                logger.error(f"{platform.title()} scraper failed for '{search_term}': {e}")
+
+    # Merge both into a single formatted list
+    all_raw = zomato_raw + swiggy_raw
+
+    if not all_raw:
+        logger.warning(f"No scraper results for '{search_term}' from any platform")
         return []
 
     formatted = []
-    for item in raw:
+    for item in all_raw:
         formatted.append({
             "food_name": (search_term or original_query).title(),
             "restaurant": item.get("restaurant_name"),
@@ -138,14 +181,17 @@ def _scrape_and_format(search_term: str, original_query: str) -> list[dict]:
             "cost_for_one": item.get("cost_for_one"),
             "rating": item.get("rating"),
             "delivery_time": item.get("delivery_time_minutes"),
-            "platform": "Zomato",
+            "platform": item.get("platform", "Zomato").title(),
             "cuisines": item.get("cuisines"),
             "discount": item.get("discount"),
             "thumbnail": item.get("thumbnail"),
             "restaurant_url": item.get("restaurant_url"),
         })
 
-    logger.info(f"Formatted {len(formatted)} results for '{search_term}'")
+    logger.info(
+        f"[TRACE] _scrape_and_format: {_platform_counts(formatted)} "
+        f"(raw — Zomato: {len(zomato_raw)}, Swiggy: {len(swiggy_raw)})"
+    )
     return formatted
 
 
@@ -154,22 +200,29 @@ def _search_fallback_categories(original_query: str) -> list[dict]:
     For vague queries ("I'm hungry", "suggest something"), search a few
     popular categories and merge results to give the user something useful.
     Limits to 3 categories to keep latency reasonable.
+
+    Deduplicates by (name, platform) so cross-platform entries for the same
+    restaurant are preserved (e.g. Pizza Hut on Zomato AND Swiggy).
     """
     import random
 
     categories = random.sample(FALLBACK_CATEGORIES, min(3, len(FALLBACK_CATEGORIES)))
     all_results: list[dict] = []
-    seen_names: set[str] = set()
+    seen_keys: set[tuple[str, str]] = set()
 
     for cat in categories:
         results = _scrape_and_format(cat, original_query)
         for r in results:
             name = r.get("restaurant")
-            if name and name not in seen_names:
-                seen_names.add(name)
+            platform = r.get("platform", "unknown")
+            key = (name, platform)
+            if name and key not in seen_keys:
+                seen_keys.add(key)
                 all_results.append(r)
 
-    logger.info(f"Fallback search across {categories} → {len(all_results)} unique results")
+    logger.info(
+        f"Fallback search across {categories} → {_platform_counts(all_results)}"
+    )
     return all_results
 
 
