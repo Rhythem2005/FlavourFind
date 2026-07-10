@@ -34,3 +34,15 @@ pip-log.txt
 
 # Scraper debug JSON files
 server/scrapers/zomato/*.json
+server/scrapers/swiggy/*.json
+
+# Logs
+*.log
+logs/
+
+# Playwright / Testing
+test-results/
+playwright-report/
+blob-report/
+playwright/.local-browsers/
+
