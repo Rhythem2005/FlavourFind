@@ -48,12 +48,12 @@ def generate_explanations(
         delivery = r.get("delivery_time")
         discount = r.get("discount")
 
-        # ── Budget fit ───────────────────────────────────────────────────
+       
         if budget_per_person is not None and price is not None:
-            cost_per_person = price  # price is already cost_for_two, used as proxy
+            cost_per_person = price  
             if intent.group_size > 1:
-                # For groups, check total affordability
-                total_cost = price  # cost_for_two is base
+                
+                total_cost = price  
                 if total_cost <= intent.budget:
                     savings = intent.budget - total_cost
                     if savings > 0:
@@ -64,7 +64,6 @@ def generate_explanations(
                 if price <= intent.budget:
                     bullets.append(f"Fits your ₹{intent.budget} budget (₹{price} for two)")
 
-        # ── Rating highlight ─────────────────────────────────────────────
         if rating is not None and max_rating is not None:
             if rating == max_rating and len(ratings) > 1:
                 bullets.append(f"Highest rated at {rating}★ among all results")
@@ -74,18 +73,15 @@ def generate_explanations(
             elif rating >= 4.0:
                 bullets.append(f"Well rated at {rating}★")
 
-        # ── Delivery speed ───────────────────────────────────────────────
         if delivery is not None and min_time is not None:
             if delivery == min_time and len(times) > 1:
                 bullets.append(f"Fastest delivery at {delivery} min")
             elif delivery <= 25:
                 bullets.append(f"Quick delivery in {delivery} min")
 
-        # ── Discount / offers ────────────────────────────────────────────
         if discount:
             bullets.append(f"Active offer: {discount}")
 
-        # ── Price comparison ─────────────────────────────────────────────
         if price is not None and avg_price is not None and len(bullets) < 3:
             if price == min_price and len(prices) > 1:
                 bullets.append(f"Cheapest option at ₹{price} for two")
@@ -93,14 +89,14 @@ def generate_explanations(
                 pct_below = int(((avg_price - price) / avg_price) * 100)
                 bullets.append(f"{pct_below}% below average price")
 
-        # ── Ensure at least one bullet ───────────────────────────────────
+       
         if not bullets:
             if r.get("cuisines"):
                 bullets.append(f"Serves {r['cuisines']}")
             else:
                 bullets.append("Matches your search")
 
-        # Cap at 3 bullets
+       
         r["why_recommended"] = bullets[:3]
 
     return results

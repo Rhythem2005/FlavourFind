@@ -692,9 +692,6 @@ const ClosingCTA = () => {
             </div>
           </form>
 
-          <p style={{ fontFamily: "Inter, sans-serif", fontSize: 13, color: T.slate, marginTop: 16 }}>
-            Free · No account needed · Results in seconds
-          </p>
         </Fade>
       </div>
     </section>
